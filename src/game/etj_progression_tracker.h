@@ -109,7 +109,15 @@ public:
 
 private:
   void useTracker(gentity_t *ent, gentity_t *activator, const ProgressionTracker &tracker);
+  void printUnmetRequirements(const gentity_t *ent, const gentity_t *activator, const ProgressionTracker &tracker);
 
+  // trigger_tracker is touched every frame, so throttle the unmet prints
+  struct UnmetPrint {
+    int32_t entityNum = ENTITYNUM_NONE;
+    int32_t time      = 0;
+  };
+
+  std::array<UnmetPrint, MAX_CLIENTS> lastUnmetPrint{};
   std::vector<ProgressionTracker> _progressionTrackers;
   std::unordered_map<std::string, std::array<int32_t, MAX_PROGRESSION_TRACKERS>> savedProgression;
 };
