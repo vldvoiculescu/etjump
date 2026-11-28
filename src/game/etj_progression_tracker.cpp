@@ -180,8 +180,13 @@ void ProgressionTrackers::useTracker(gentity_t *ent, gentity_t *activator, const
     }
   }
 
-  if (!activate && g_debugTrackers.integer) {
-    printUnmetRequirements(ent, activator, tracker);
+  if (g_debugTrackers.integer) {
+    if (activate) {
+      // requirements are met now, so the next failure prints right away
+      lastUnmetPrint[ClientNum(activator)].erase(ent->s.number);
+    } else {
+      printUnmetRequirements(ent, activator, tracker);
+    }
   }
 
   if (activate) {
@@ -220,15 +225,7 @@ void ProgressionTrackers::printTrackerChanges(const gentity_t *activator,
 void ProgressionTrackers::printUnmetRequirements(const gentity_t *ent, const gentity_t *activator,
                                                  const ProgressionTracker &tracker) {
   const int32_t clientNum = ClientNum(activator);
-  UnmetPrint &last        = lastUnmetPrint[clientNum];
-
-  if (last.entityNum == ent->s.number && level.time >= last.time && level.time - last.time < 1000) {
-    return;
-  }
-
-  last = {ent->s.number, level.time};
-
-  const int *progression = activator->client->pers.progression;
+  const int *progression  = activator->client->pers.progression;
   std::vector<std::string> unmet;
   std::vector<std::string> notEqualAll;
   bool notEqualAllMet = false;
@@ -282,6 +279,18 @@ void ProgressionTrackers::printUnmetRequirements(const gentity_t *ent, const gen
   if (!notEqualAllMet) {
     unmet.insert(unmet.end(), notEqualAll.cbegin(), notEqualAll.cend());
   }
+
+  UnmetPrint &last = lastUnmetPrint[clientNum][ent->s.number];
+  std::string text = StringUtils::join(unmet, "\n");
+  const bool stillActive =
+    level.time >= last.lastActivation && level.time - last.lastActivation < UNMET_PRINT_RESET_TIME;
+  last.lastActivation = level.time;
+
+  if (stillActive && text == last.text) {
+    return;
+  }
+
+  last.text = std::move(text);
 
   Printer::popup(clientNum, StringUtils::format("^7%s ^3%s ^7requirements not met:\n", ent->classname,
                                                 ent->targetname ? ent->targetname : ""));

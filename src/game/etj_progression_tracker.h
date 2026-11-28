@@ -111,13 +111,18 @@ private:
   void useTracker(gentity_t *ent, gentity_t *activator, const ProgressionTracker &tracker);
   void printUnmetRequirements(const gentity_t *ent, const gentity_t *activator, const ProgressionTracker &tracker);
 
-  // trigger_tracker is touched every frame, so throttle the unmet prints
+  // trackers can be activated every frame (e.g. standing in a trigger),
+  // so only print again if the unmet requirements change, or if the
+  // tracker wasn't activated by the client for 'UNMET_PRINT_RESET_TIME'
+  static constexpr int32_t UNMET_PRINT_RESET_TIME = 1000;
+
   struct UnmetPrint {
-    int32_t entityNum = ENTITYNUM_NONE;
-    int32_t time      = 0;
+    int32_t lastActivation = 0;
+    std::string text;
   };
 
-  std::array<UnmetPrint, MAX_CLIENTS> lastUnmetPrint{};
+  // per client, keyed by entity number
+  std::array<std::unordered_map<int32_t, UnmetPrint>, MAX_CLIENTS> lastUnmetPrint{};
   std::vector<ProgressionTracker> _progressionTrackers;
   std::unordered_map<std::string, std::array<int32_t, MAX_PROGRESSION_TRACKERS>> savedProgression;
 };
