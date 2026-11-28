@@ -222,63 +222,91 @@ void ProgressionTrackers::printTrackerChanges(const gentity_t *activator,
   }
 }
 
-void ProgressionTrackers::printUnmetRequirements(const gentity_t *ent, const gentity_t *activator,
-                                                 const ProgressionTracker &tracker) {
-  const int32_t clientNum = ClientNum(activator);
-  const int *progression  = activator->client->pers.progression;
+namespace {
+bool bitIsSet(const int32_t value, const int32_t bit) {
+  return bit >= 0 && bit < 32 && (value & (1 << bit));
+}
+
+std::string unmetRequirement(const char *key, const int32_t idx, const int32_t required, const int32_t value) {
+  return StringUtils::format("^7Tracker ^3%i^7: ^9%s %i ^7not met, value: ^2%i", idx + 1, key, required, value);
+}
+
+std::vector<std::string> getUnmetRequirements(const int *progression,
+                                              const ProgressionTrackers::ProgressionTracker &tracker) {
+  struct Condition {
+    const char *key;
+    const int *required;
+    bool (*unmet)(int32_t required, int32_t value);
+  };
+
+  const std::array<Condition, 6> conditions{
+    {
+     {"tracker_eq", tracker.equal,
+       [](int32_t r, int32_t v) {
+         return v != r;
+       }},
+     {"tracker_not_eq_any", tracker.notEqualAny,
+       [](int32_t r, int32_t v) {
+         return v == r;
+       }},
+     {"tracker_gt", tracker.greaterThan,
+       [](int32_t r, int32_t v) {
+         return v <= r;
+       }},
+     {"tracker_lt", tracker.lessThan,
+       [](int32_t r, int32_t v) {
+         return v >= r;
+       }},
+     {"tracker_bit_is_set", tracker.bitIsSet,
+       [](int32_t r, int32_t v) {
+         return !bitIsSet(v, r);
+       }},
+     {"tracker_bit_not_set", tracker.bitNotSet,
+       [](int32_t r, int32_t v) {
+         return bitIsSet(v, r);
+       }},
+     }
+  };
+
   std::vector<std::string> unmet;
   std::vector<std::string> notEqualAll;
   bool notEqualAllMet = false;
 
-  const auto requirement = [progression](const char *key, const int32_t idx, const int32_t required) {
-    return StringUtils::format("^7Tracker ^3%i^7: ^9%s %i ^7not met, value: ^2%i", idx + 1, key, required,
-                               progression[idx]);
-  };
-
-  const auto bitIsSet = [](const int32_t value, const int32_t bit) {
-    return bit >= 0 && bit < 32 && (value & (1 << bit));
-  };
-
   for (int32_t idx = 0; idx < MAX_PROGRESSION_TRACKERS; idx++) {
     const int32_t value = progression[idx];
 
-    if (tracker.equal[idx] != ProgressionTrackerValueNotSet && tracker.equal[idx] != value) {
-      unmet.emplace_back(requirement("tracker_eq", idx, tracker.equal[idx]));
-    }
-
-    if (tracker.notEqualAny[idx] != ProgressionTrackerValueNotSet && tracker.notEqualAny[idx] == value) {
-      unmet.emplace_back(requirement("tracker_not_eq_any", idx, tracker.notEqualAny[idx]));
-    }
-
-    if (tracker.greaterThan[idx] != ProgressionTrackerValueNotSet && tracker.greaterThan[idx] >= value) {
-      unmet.emplace_back(requirement("tracker_gt", idx, tracker.greaterThan[idx]));
-    }
-
-    if (tracker.lessThan[idx] != ProgressionTrackerValueNotSet && tracker.lessThan[idx] <= value) {
-      unmet.emplace_back(requirement("tracker_lt", idx, tracker.lessThan[idx]));
-    }
-
-    if (tracker.bitIsSet[idx] != ProgressionTrackerValueNotSet && !bitIsSet(value, tracker.bitIsSet[idx])) {
-      unmet.emplace_back(requirement("tracker_bit_is_set", idx, tracker.bitIsSet[idx]));
-    }
-
-    if (tracker.bitNotSet[idx] != ProgressionTrackerValueNotSet && bitIsSet(value, tracker.bitNotSet[idx])) {
-      unmet.emplace_back(requirement("tracker_bit_not_set", idx, tracker.bitNotSet[idx]));
+    for (const auto &c : conditions) {
+      if (c.required[idx] != ProgressionTrackers::ProgressionTrackerValueNotSet && c.unmet(c.required[idx], value)) {
+        unmet.emplace_back(unmetRequirement(c.key, idx, c.required[idx], value));
+      }
     }
 
     // only unmet if every index matches
-    if (tracker.notEqualAll[idx] != ProgressionTrackerValueNotSet) {
-      if (tracker.notEqualAll[idx] == value) {
-        notEqualAll.emplace_back(requirement("tracker_not_eq_all", idx, tracker.notEqualAll[idx]));
-      } else {
-        notEqualAllMet = true;
-      }
+    const int32_t notEqual = tracker.notEqualAll[idx];
+
+    if (notEqual == ProgressionTrackers::ProgressionTrackerValueNotSet) {
+      continue;
+    }
+
+    if (notEqual == value) {
+      notEqualAll.emplace_back(unmetRequirement("tracker_not_eq_all", idx, notEqual, value));
+    } else {
+      notEqualAllMet = true;
     }
   }
 
   if (!notEqualAllMet) {
     unmet.insert(unmet.end(), notEqualAll.cbegin(), notEqualAll.cend());
   }
+
+  return unmet;
+}
+} // namespace
+
+void ProgressionTrackers::printUnmetRequirements(const gentity_t *ent, const gentity_t *activator,
+                                                 const ProgressionTracker &tracker) {
+  const int32_t clientNum              = ClientNum(activator);
+  const std::vector<std::string> unmet = getUnmetRequirements(activator->client->pers.progression, tracker);
 
   UnmetPrint &last = lastUnmetPrint[clientNum][ent->s.number];
   std::string text = StringUtils::join(unmet, "\n");
